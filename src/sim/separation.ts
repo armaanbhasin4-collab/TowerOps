@@ -88,14 +88,26 @@ export function updateSeparation(w: World) {
       } else if ((lowDepA && a.alt < 600) || (lowDepB && b.alt < 600)) {
         if (ea && eb && ea.rwy.id !== eb.rwy.id) req = Math.min(req, 1);
       }
-      const viol = !exempt && lat < req && dv < 950;
+      // in trail on the same final the glidepath gives no usable vertical separation: distance alone counts
+      const viol = !exempt && lat < req && (kind === 'wake' || kind === 'approach' || dv < 950);
       if (viol) {
-        const crit = lat < 0.6 && dv < 450;
+        const crit = lat < 0.6 && dv < 450 && !(kind !== 'airborne' && lat > 0.35);
         alerts.push({ key: 'sep:' + key, level: crit ? 'critical' : 'violation', kind, ac: [a.id, b.id], since: s.t, text: `${a.callsign} / ${b.callsign} ${lat.toFixed(1)} NM, ${Math.round(dv / 100) * 100} ft${kind === 'wake' ? ` (wake: ${req} NM required)` : ''}` });
         if (once(w, 'sep:' + key, true)) {
           if (kind === 'wake') s.stats.wakeViolations++; else s.stats.separationViolations++;
           s.stats.safetyPenalty += kind === 'wake' ? 4 : 7;
           logEvent(w, kind === 'wake' ? 'wake' : 'separation', 'warning', `Loss of separation: ${a.callsign} and ${b.callsign} – ${lat.toFixed(1)} NM / ${Math.round(dv)} ft (required ${req} NM or 1000 ft)`, [a, b]);
+        }
+        // TCAS-style resolution for slow-closure geometries that never show up in the look-ahead
+        if (d.safetyIntervention && lat < 1.2 && dv < 600 && !(estA || estB) && kind === 'airborne') {
+          const [hi, lo] = a.alt >= b.alt ? [a, b] : [b, a];
+          if (!(hi.flags.raUntil > s.t)) {
+            hi.flags.raUntil = s.t + 18; hi.flags.raDir = 1;
+            lo.flags.raUntil = s.t + 18; lo.flags.raDir = -1;
+            radioPilot(w, hi, `${csay(hi)}, TCAS RA, climbing.`);
+            radioPilot(w, lo, `${csay(lo)}, TCAS RA, descending.`);
+            logEvent(w, 'pilot_action', 'warning', `TCAS resolution advisory: ${hi.callsign} climbing, ${lo.callsign} descending (pilot safety action)`, [hi, lo]);
+          }
         }
         if (crit && once(w, 'nm:' + key, true)) {
           s.stats.nearMisses++;

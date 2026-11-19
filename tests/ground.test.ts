@@ -219,7 +219,7 @@ describe('taxiway conflicts', () => {
   // At t≈20 s A stops at (-338,-80), B at (-300,-64), 15 m apart, permanently. Suspected: ground.ts computeGroundLimits –
   // pass 1 ("body in my path") records a symmetric hit for both aircraft, and pass 2 (the priority rule) skips pairs that
   // already have a body hit, so nobody is given the right of way.
-  it.skip('crossing paths at an intersection: no relative timing ends in a permanent mutual deadlock', () => {
+  it('crossing paths at an intersection: no relative timing ends in a permanent mutual deadlock', () => {
     const deadlocked = OFFSETS.filter((startS) => { const r = crossingRun(startS); return r.sim.s.stats.groundConflicts > 0 || !r.arrived; });
     expect(deadlocked).toEqual([]);
   });

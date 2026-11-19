@@ -163,7 +163,7 @@ describe('airborne separation monitoring', () => {
   // minima of wakeMinimum() can therefore never be violated on the glidepath (a B738 3.5 NM behind an A380 passes).
   // Repro: wakeSeparation on, B77W on the 27L ILS at 5 NM, B738 at 9.5 NM (required 5 NM) → no event, no stat.
   // Suspected: separation.ts updateSeparation, `const viol = !exempt && lat < req && dv < 950` applied to kind 'wake'/'approach'.
-  it.skip('with wake separation on, a medium 4.5 NM behind a heavy on the glidepath is a wake violation', () => {
+  it('with wake separation on, a medium 4.5 NM behind a heavy on the glidepath is a wake violation', () => {
     const sim = wakePair(true, false);
     expect(sim.s.stats.wakeViolations).toBe(1);
     expect(eventsOf(sim, 'wake')).toHaveLength(1);
@@ -319,7 +319,7 @@ describe('TCAS-style resolution', () => {
   // Repro: quiet ATL sim, safetyIntervention true, DAL1 at 6000 ft hdg 090 at 200 kt, UAL2 1500 m behind on the same
   // track and level at 240 kt; advance 180 s → both 'crashed', no "TCAS" event.
   // Suspected: separation.ts updateSeparation (RA logic sits in the `else` of `if (viol)`).
-  it.skip('with safetyIntervention a slow-closure collision course is also resolved', () => {
+  it('with safetyIntervention a slow-closure collision course is also resolved', () => {
     const { sim, a, b } = overtake(true);
     expect(eventsOf(sim, 'pilot_action').filter((e) => /TCAS/.test(e.text)).length).toBeGreaterThanOrEqual(1);
     expect(a.phase).not.toBe('crashed');

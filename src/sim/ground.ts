@@ -157,6 +157,53 @@ export function computeGroundLimits(w: World): Map<number, GroundLimit> {
     bodyHit.set(a.id, hits);
     res.set(a.id, { lim, by });
   }
+  // mutual obstruction at a crossing (not head-on): the aircraft deeper into the conflict goes first,
+  // squeezing past with minimum wingtip clearance instead of both stopping for good
+  const tight = (a: Aircraft, skip: Aircraft): { lim: number; by: number } => {
+    const ta = typeOf(a.type);
+    const sa = samples.get(a.id)!;
+    let lim = Infinity, by = -1;
+    for (const b of surface) {
+      if (b.id === a.id) continue;
+      if ((b.phase === 'takeoff_roll' || (b.phase === 'landing_roll' && b.route.length < 2)) && b.gs > 30) continue;
+      if (dist(a.x, a.y, b.x, b.y) > sa.look + 160) continue;
+      const margin = b === skip ? -5 : 2;
+      const cs = circles(b);
+      for (let i = 0; i < sa.d.length; i++) {
+        let h = false;
+        for (const [cx, cy, cr] of cs) if (dist(sa.x[i], sa.y[i], cx, cy) < ta.span / 2 + cr + margin) { h = true; break; }
+        if (!h) continue;
+        if (i === 0) {
+          const [al] = alongCross(b.x, b.y, a.x, a.y, a.reverse ? norm360(a.hdg + 180) : a.hdg);
+          if (al > 2 && a.routeS < lim) { lim = a.routeS; by = b.id; }
+        } else {
+          const l = a.routeS + sa.d[i] - 10;
+          if (l < lim) { lim = l; by = b.id; }
+        }
+        break;
+      }
+    }
+    return { lim, by };
+  };
+  for (const a of movers) {
+    for (const bid of bodyHit.get(a.id)!) {
+      if (bid <= a.id || !bodyHit.get(bid)?.has(a.id)) continue;
+      const b = movers.find((m) => m.id === bid)!;
+      const ha = a.reverse ? norm360(a.hdg + 180) : a.hdg, hb = b.reverse ? norm360(b.hdg + 180) : b.hdg;
+      if (Math.abs(angDiff(ha, hb)) > 140) continue; // genuine head-on: needs the controller
+      // the one whose nose is closer to the other's path centreline is "in" the crossing
+      const depth = (p: Aircraft, q: Aircraft) => {
+        const sq = samples.get(q.id)!;
+        const [ux, uy] = vecOf(p.reverse ? norm360(p.hdg + 180) : p.hdg);
+        const nx = p.x + ux * typeOf(p.type).length * 0.45, ny = p.y + uy * typeOf(p.type).length * 0.45;
+        let m = Infinity;
+        for (let i = 0; i < sq.d.length; i++) m = Math.min(m, dist(nx, ny, sq.x[i], sq.y[i]));
+        return m;
+      };
+      const winner = depth(a, b) <= depth(b, a) ? a : b;
+      res.set(winner.id, tight(winner, winner === a ? b : a));
+    }
+  }
   // pass 2: crossing / merging paths – the later arrival gives way
   for (const a of movers) {
     const ta = typeOf(a.type);
@@ -176,20 +223,20 @@ export function computeGroundLimits(w: World): Map<number, GroundLimit> {
       if (!sb || (!assist && s.weather.visSM < 0.5)) continue;
       const vb = Math.max(b.gs * KT, 3);
       const need = (ta.span + tb.span) / 2 + 2;
-      let found = false;
-      for (let i = 1; i < sa.d.length && !found; i++) {
-        for (let j = 1; j < sb.d.length; j++) {
-          if (dist(sa.x[i], sa.y[i], sb.x[j], sb.y[j]) < need) {
-            const tA = sa.d[i] / va, tB = sb.d[j] / vb;
-            if (tA > tB + 0.01 || (Math.abs(tA - tB) <= 0.01 && a.id > b.id)) {
-              // stop with the nose clear of the other aircraft's path
-              const l = a.routeS + sa.d[i] - ta.length / 2 - 14;
-              if (l < lim) { lim = l; by = b.id; }
-            }
-            found = true;
-            break;
-          }
-        }
+      // first sample of each aircraft that lies inside the other's intended path
+      const entry = (p: Samp, q: Samp): number => {
+        for (let i = 1; i < p.d.length; i++) for (let k = 1; k < q.d.length; k++) if (dist(p.x[i], p.y[i], q.x[k], q.y[k]) < need) return i;
+        return -1;
+      };
+      const ia = entry(sa, sb);
+      if (ia < 0) continue;
+      const ib = entry(sb, sa);
+      if (ib < 0) continue;
+      const tA = sa.d[ia] / va, tB = sb.d[ib] / vb;
+      if (tA > tB + 0.01 || (Math.abs(tA - tB) <= 0.01 && a.id > b.id)) {
+        // stop with the nose clear of the other aircraft's path
+        const l = a.routeS + sa.d[ia] - ta.length / 2 - 14;
+        if (l < lim) { lim = l; by = b.id; }
       }
     }
     if (by >= 0) out.set(a.id, { s: lim, by });
