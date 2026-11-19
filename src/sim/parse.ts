@@ -42,6 +42,7 @@ export function parseCommand(ap: Airport, text: string, knownCallsigns: string[]
     return n;
   };
   const skipFill = () => { while (peek() && FILLER.has(peek())) i++; };
+  let ctxRwy: string | undefined; // "RUNWAY 27R, cleared for takeoff" style prefix
 
   while (i < tk.length) {
     const t = tk[i];
@@ -65,7 +66,7 @@ export function parseCommand(ap: Airport, text: string, knownCallsigns: string[]
       cmds.push({ t: 'DEP_CLEARANCE' });
     } else if (t === 'TAXI') {
       i++;
-      const c: Extract<Command, { t: 'TAXI' }> = { t: 'TAXI' };
+      const c: Extract<Command, { t: 'TAXI' }> = { t: 'TAXI', rwy: ctxRwy };
       for (;;) {
         skipFill();
         const x = peek();
@@ -77,7 +78,7 @@ export function parseCommand(ap: Airport, text: string, knownCallsigns: string[]
         } else if (x === 'VIA') {
           i++;
           c.via = [];
-          while (peek() && !['HOLD', 'GATE', 'STAND', 'CROSS', 'TO', 'RUNWAY', 'RWY'].includes(peek()) && /^[A-Z]{1,2}\d{0,2}$/.test(peek())) c.via.push(tk[i++]);
+          while (peek() && !['HOLD', 'GATE', 'STAND', 'CROSS', 'TO', 'RUNWAY', 'RWY'].includes(peek()) && (peek() === 'AND' || /^[A-Z]{1,2}\d{0,2}$/.test(peek()))) { if (peek() === 'AND') i++; else c.via.push(tk[i++]); }
           if (!c.via.length) throw new ParseError('TAXI VIA needs at least one taxiway.');
         } else if (x === 'HOLD' && tk[i + 1] === 'SHORT') {
           i += 2;
@@ -109,17 +110,17 @@ export function parseCommand(ap: Airport, text: string, knownCallsigns: string[]
       i += t === 'LUAW' ? 1 : 2;
       if (peek() === 'AND') i++;
       if (peek() === 'WAIT') i++;
-      cmds.push({ t: 'LINE_UP', rwy: rwyAt() });
+      cmds.push({ t: 'LINE_UP', rwy: rwyAt() ?? ctxRwy });
     } else if (t === 'CANCEL' || t === 'ABORT') {
       i++;
       while (peek() === 'TAKEOFF' || peek() === 'CLEARANCE') i++;
       cmds.push({ t: 'CANCEL_TAKEOFF' });
     } else if (t === 'TAKEOFF' || t === 'CTO' || (t === 'CLEARED' && (n1 === 'TAKEOFF' || (n1 === 'FOR' && n2 === 'TAKEOFF')))) {
       i += t === 'CLEARED' ? (n1 === 'FOR' ? 3 : 2) : 1;
-      cmds.push({ t: 'TAKEOFF', rwy: rwyAt() });
+      cmds.push({ t: 'TAKEOFF', rwy: rwyAt() ?? ctxRwy });
     } else if (t === 'LAND' || t === 'CTL' || (t === 'CLEARED' && (n1 === 'LAND' || (n1 === 'TO' && n2 === 'LAND')))) {
       i += t === 'CLEARED' ? (n1 === 'TO' ? 3 : 2) : 1;
-      cmds.push({ t: 'LAND', rwy: rwyAt() });
+      cmds.push({ t: 'LAND', rwy: rwyAt() ?? ctxRwy });
     } else if (t === 'ILS' || t === 'APPROACH' || t === 'VISUAL' || (t === 'CLEARED' && (n1 === 'ILS' || n1 === 'APPROACH' || n1 === 'VISUAL'))) {
       i += t === 'CLEARED' ? 2 : 1;
       while (peek() === 'APPROACH' || peek() === 'ILS') i++;
@@ -177,7 +178,8 @@ export function parseCommand(ap: Airport, text: string, knownCallsigns: string[]
       i++;
       const r = rwyAt();
       if (!r) throw new ParseError('EXPECT needs a runway.');
-      cmds.push({ t: 'ASSIGN_RUNWAY', rwy: r });
+      if (t !== 'EXPECT' && /^(TAXI|LINE|LUAW|CLEARED|TAKEOFF|LAND|CTO|CTL|WIND)$/.test(peek() ?? '')) ctxRwy = r;
+      else cmds.push({ t: 'ASSIGN_RUNWAY', rwy: r });
     } else if (t === 'GATE' || t === 'STAND') {
       const g = n1;
       if (!g || !gateByName(ap, g)) throw new ParseError(`Gate ${g ?? ''} does not exist at ${ap.icao}.`);

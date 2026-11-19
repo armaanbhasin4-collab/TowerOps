@@ -179,5 +179,5 @@ export const ATL: AirportDef = {
     { airline: 'FDX', weight: 1.2, types: ['B763', 'B752', 'B772'], routes: ['MEM', 'IND', 'EWR', 'OAK'] },
   ],
   baseRate: 90,
-  towerPos: [-1180, 150],
+  towerPos: [435, 62],
 };

@@ -1,0 +1,41 @@
+@import "tailwindcss";
+
+@theme {
+  --color-navy-950: #050a11;
+  --color-navy-900: #08111b;
+  --color-navy-850: #0b1622;
+  --color-navy-800: #0f1c2b;
+  --color-navy-700: #162739;
+  --color-navy-600: #1f3550;
+  --color-radar: #56e39f;
+  --color-cyan-a: #4cc9f0;
+  --color-amber-a: #ffb703;
+  --color-red-a: #ff4d5a;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+html, body, #root { height: 100%; margin: 0; }
+body { background: #050a11; color: #c8d4e2; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 13px; overflow: hidden; }
+* { scrollbar-width: thin; scrollbar-color: #1f3550 transparent; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: #1f3550; border-radius: 4px; }
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; opacity: 0.45; }
+input, select { outline: none; }
+input:focus-visible, select:focus-visible, button:focus-visible { box-shadow: 0 0 0 1px #4cc9f0; }
+.btn { border: 1px solid #1f3550; background: #0f1c2b; color: #c8d4e2; border-radius: 3px; padding: 3px 8px; font-size: 12px; line-height: 16px; white-space: nowrap; }
+.btn:hover:not(:disabled) { background: #162739; border-color: #2c4a6e; }
+.btn-primary { border-color: #1c6f8f; background: #0d3a4d; color: #9be7ff; }
+.btn-primary:hover:not(:disabled) { background: #115068; }
+.btn-go { border-color: #1f7a54; background: #0d3b2a; color: #8ff0c1; }
+.btn-go:hover:not(:disabled) { background: #125038; }
+.btn-warn { border-color: #8a6400; background: #3d2e05; color: #ffd166; }
+.btn-warn:hover:not(:disabled) { background: #524008; }
+.btn-danger { border-color: #8f2832; background: #40131a; color: #ff9aa2; }
+.btn-danger:hover:not(:disabled) { background: #581a23; }
+.btn-on { border-color: #4cc9f0; background: #0d3a4d; color: #c9f1ff; }
+.field { background: #08111b; border: 1px solid #1f3550; color: #dbe6f2; border-radius: 3px; padding: 3px 6px; font-size: 12px; font-family: var(--font-mono); }
+.panel-h { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: #6f859d; }
+.mono { font-family: var(--font-mono); }
+@keyframes pulse-a { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+.blink { animation: pulse-a 1s infinite; }
