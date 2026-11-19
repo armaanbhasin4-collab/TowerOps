@@ -79,6 +79,12 @@ export function updateSeparation(w: World) {
       } else if (lowDepA && lowDepB) {
         // successive departures: 1 NM if courses diverge by 15° or more
         req = Math.abs(angDiff(a.track, b.track)) >= 15 ? 1 : latMin;
+        // simultaneous departures from parallel runways on parallel or diverging courses
+        if (parallel) {
+          const [ux, uy] = vecOf(a.track), [vx, vy] = vecOf(b.track);
+          const closing = (b.x - a.x) * (ux * a.gs - vx * b.gs) + (b.y - a.y) * (uy * a.gs - vy * b.gs);
+          if (closing <= 0 || Math.abs(angDiff(a.track, b.track)) < 12) req = 0.5;
+        }
       } else if ((lowDepA && a.alt < 600) || (lowDepB && b.alt < 600)) {
         if (ea && eb && ea.rwy.id !== eb.rwy.id) req = Math.min(req, 1);
       }
@@ -197,8 +203,9 @@ export function updateSeparation(w: World) {
           if (once(w, `dl:${a.id}-${b.id}`, true)) {
             s.stats.groundConflicts++;
             s.stats.safetyPenalty += 2;
-            logEvent(w, 'conflict', 'warning', `Taxi conflict: ${a.callsign} and ${b.callsign} are nose-to-nose and cannot proceed – re-route or tow one of them`, [a, b]);
-            radioPilot(w, a, `${ap.facility} Ground, ${csay(a)}, we are nose to nose with traffic, unable to continue.`);
+            const headOn = Math.abs(angDiff(a.hdg, b.hdg)) > 120;
+            logEvent(w, 'conflict', 'warning', `Taxi conflict: ${a.callsign} and ${b.callsign} are ${headOn ? 'nose-to-nose' : 'blocking each other'} and cannot proceed – re-route or tow one of them`, [a, b]);
+            radioPilot(w, a, `${ap.facility} Ground, ${csay(a)}, we are ${headOn ? 'nose to nose with' : 'blocked by'} traffic, unable to continue.`);
             if (!a.request) a.request = { type: 'tow', since: s.t, text: 'Blocked head-on – needs re-route or tow' };
             if (!b.request) b.request = { type: 'tow', since: s.t, text: 'Blocked head-on – needs re-route or tow' };
           }

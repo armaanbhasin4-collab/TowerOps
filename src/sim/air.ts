@@ -36,8 +36,8 @@ export function minSpeed(w: World, ac: Aircraft): number {
   const t = typeOf(ac.type);
   const d = dist(ac.x, ac.y, 0, 0);
   if (ac.phase === 'final') return t.vref;
-  if (ac.kind === 'arrival' && (d < 14 * NM || ac.alt < 5000)) return t.vref + 15;
-  return t.vClean - 20;
+  if (ac.kind === 'arrival' && (d < 22 * NM || ac.alt < 6000)) return t.vref + 15;
+  return t.vClean - 30;
 }
 
 export function goAround(w: World, ac: Aircraft, why: string, byPilot: boolean) {

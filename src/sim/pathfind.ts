@@ -15,6 +15,10 @@ export interface RouteOpts {
   /** extra terminal cost per goal node */
   goalCost?: (node: number) => number;
   maxTurn?: number;
+  /** edges to avoid if reasonably possible (e.g. blocked by a stationary aircraft) */
+  avoid?: Set<number>;
+  /** directed edges (edgeId*2 + (a->b ? 0 : 1)) to avoid: opposite-direction traffic is using them */
+  avoidDir?: Set<number>;
   /** extra acceptance test for a goal node given the node it is reached from */
   goalOk?: (node: number, prev: number) => boolean;
 }
@@ -93,6 +97,8 @@ export function findRoute(ap: Airport, start: number, goals: number[] | number, 
       }
       let c = base + e.len * mult;
       if (ap.nodes[v].kind === 'rwy' && e.kind !== 'runway') c += 500; // discourage runway crossings
+      if (opts.avoid?.has(eid)) c += 1400;
+      if (opts.avoidDir?.has(eid * 2 + (e.a === node ? 0 : 1))) c += 900 + e.len * 3;
       const st = (eid * 2 + (e.a === node ? 0 : 1)) * K + nk;
       if (c < cost[st]) {
         cost[st] = c;

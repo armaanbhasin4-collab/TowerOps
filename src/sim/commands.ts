@@ -8,11 +8,11 @@
 import type { Aircraft, Command, CommandResult, PendingTx } from './types';
 import { KT, NM, alongCross, angDiff, dist, norm360, rand, randRange } from './util';
 import { typeOf, sizeFits } from './data/aircraft';
-import { endRef, gateByName, holdsOf, normRwyName, runwayById, rwyLateral, toraFrom, nearestNode } from './airport/query';
+import { edgeBetween, endRef, gateByName, holdsOf, normRwyName, runwayById, rwyLateral, toraFrom, nearestNode } from './airport/query';
 import { findRoute, type Route } from './pathfind';
 import { World, clearRequest, csay, isAirborne, logEvent, radioAtc, radioPilot, radioSystem } from './world';
 import { atcPhrase, readbackPhrase, sayRwy } from './phraseology';
-import { cumOf, curSeg, nextHoldAhead, pushbackRoute, rejectTakeoff, runwayHot, runwayOccupants, setRoute, startLineUp, startPushback, startTow, depRunwayId } from './ground';
+import { rollingToward, cumOf, curSeg, nextHoldAhead, pushbackRoute, rejectTakeoff, runwayHot, runwayOccupants, setRoute, startLineUp, startPushback, startTow, depRunwayId } from './ground';
 import { fixByName, goAround, minSpeed } from './air';
 import { gateUser } from './traffic';
 import { runwayWeatherIssue, sayWind } from './weather';
@@ -36,6 +36,28 @@ export function planTaxi(w: World, ac: Aircraft, c: Extract<Command, { t: 'TAXI'
     start = n.id;
   }
   const closed = new Set(s.closedEdges);
+  // prefer routes that do not run into aircraft standing on (or pushing onto) a taxiway
+  const avoid = new Set<number>();
+  for (const o of s.aircraft) {
+    if (o === ac || isAirborne(o) || o.route.length < 2) continue;
+    if (!(o.phase === 'pushback' || o.phase === 'push_done' || o.phase === 'disabled' || o.phase === 'vacated' || (o.blockedSince !== undefined && s.t - o.blockedSince > 20) || o.holdPos)) continue;
+    const from = o.phase === 'pushback' ? 1 : Math.max(0, o.route.length - 2);
+    for (let i = from; i + 1 < o.route.length; i++) {
+      const ed = edgeBetween(ap, o.route[i], o.route[i + 1]);
+      if (ed && ed.kind !== 'gate') avoid.add(ed.id);
+    }
+  }
+  // ...and routes that would meet moving traffic head-on along the same taxiway
+  const avoidDir = new Set<number>();
+  for (const o of s.aircraft) {
+    if (o === ac || !(o.phase === 'taxi_in' || o.phase === 'taxi_out') || o.route.length < 2 || o.reverse) continue;
+    const cum = cumOf(ap, o.route);
+    for (let i = 0; i + 1 < o.route.length; i++) {
+      if (cum[i + 1] < o.routeS || cum[i] > o.routeS + 1500) continue;
+      const ed = edgeBetween(ap, o.route[i], o.route[i + 1]);
+      if (ed && ed.kind !== 'gate') avoidDir.add(ed.id * 2 + (ed.a === o.route[i] ? 1 : 0)); // penalise the opposite direction
+    }
+  }
   const via = c.via?.map((v) => v.toUpperCase());
   if (via) for (const v of via) if (!ap.edges.some((e) => e.name === v)) return `taxiway ${v} does not exist at ${ap.icao}`;
   const wantsGate = c.gate || (ac.kind === 'arrival' && !c.rwy);
@@ -47,7 +69,7 @@ export function planTaxi(w: World, ac: Aircraft, c: Extract<Command, { t: 'TAXI'
     if (!sizeFits(t.size, g.size)) return `gate ${g.name} is too small for the ${t.name}`;
     const user = gateUser(w, g.name, ac);
     if (user) return `gate ${g.name} is ${user.phase === 'parked' || user.phase === 'pushback' ? 'occupied by' : 'assigned to'} ${user.callsign}`;
-    const route = findRoute(ap, start, g.node, { prev, via, closed });
+    const route = findRoute(ap, start, g.node, { prev, via, closed, avoid, avoidDir });
     if (!route) return via ? `no route to gate ${g.name} via ${via.join(' ')}` : `no taxi route to gate ${g.name}`;
     return { route, gate: g.name, ...stopAt(w, ac, route, c.holdShort) };
   }
@@ -60,7 +82,7 @@ export function planTaxi(w: World, ac: Aircraft, c: Extract<Command, { t: 'TAXI'
   if (!holds.length) return `runway ${rname} is too short for the ${t.name} (needs ${Math.round(t.takeoffDist)} m)`;
   const info = new Map(holds.map((h) => [h.hold, h]));
   const route = findRoute(ap, start, holds.map((h) => h.hold), {
-    prev, via, closed,
+    prev, via, closed, avoid, avoidDir,
     goalCost: (n) => (e.rwy.length - toraFrom(info.get(n)!, e.idx)) * 4,
     goalOk: (n, p) => rwyLateral(e.rwy, ap.nodes[p].x, ap.nodes[p].y) > rwyLateral(e.rwy, ap.nodes[n].x, ap.nodes[n].y) - 1,
   });
@@ -273,6 +295,10 @@ function pilotCheck(w: World, ac: Aircraft, c: Command): string | undefined {
           const dd = dist(o.x, o.y, endRef(ap, o.rwy)!.end.x, endRef(ap, o.rwy)!.end.y);
           if (dd < (c.t === 'TAKEOFF' && ac.phase === 'lined_up' ? 1.2 : 2) * NM && o.alt < 1200 && canSee) return `traffic on ${(dd / NM).toFixed(1)} mile final (${o.callsign})`;
         }
+      }
+      if (canSee && ac.phase !== 'lined_up') {
+        const roller = rollingToward(w, ac);
+        if (roller) return `traffic rolling on the runway (${roller.callsign})`;
       }
       if (c.t === 'LINE_UP') return;
       if (d.perfRealism) {

@@ -124,18 +124,19 @@ export function computeGroundLimits(w: World): Map<number, GroundLimit> {
     }
     samples.set(a.id, sm);
   }
+  // pass 1: aircraft physically in my path (following / obstruction)
+  const bodyHit = new Map<number, Set<number>>();
+  const res = new Map<number, { lim: number; by: number }>();
   for (const a of movers) {
     const ta = typeOf(a.type);
     const sa = samples.get(a.id)!;
     let lim = Infinity, by = -1;
-    const va = Math.max(a.gs * KT, 3);
+    const hits = new Set<number>();
     for (const b of surface) {
       if (b.id === a.id) continue;
       if ((b.phase === 'takeoff_roll' || (b.phase === 'landing_roll' && b.route.length < 2)) && b.gs > 30) continue;
-      const tb = typeOf(b.type);
       const gap = dist(a.x, a.y, b.x, b.y);
       if (gap > sa.look + 160) continue;
-      // 1. physical body in my path
       const cs = circles(b);
       let hit = -1;
       for (let i = 0; i < sa.d.length && hit < 0; i++) {
@@ -146,14 +147,30 @@ export function computeGroundLimits(w: World): Map<number, GroundLimit> {
       if (hit === 0) {
         // already overlapping the protected zone: only stop if the other aircraft is ahead of us
         const [al] = alongCross(b.x, b.y, a.x, a.y, a.reverse ? norm360(a.hdg + 180) : a.hdg);
-        if (al > 2) { if (a.routeS < lim) { lim = a.routeS; by = b.id; } }
-        continue;
-      }
-      if (hit > 0) {
+        if (al > 2) { hits.add(b.id); if (a.routeS < lim) { lim = a.routeS; by = b.id; } }
+      } else if (hit > 0) {
+        hits.add(b.id);
         const l = a.routeS + sa.d[hit] - 10;
         if (l < lim) { lim = l; by = b.id; }
-        continue;
       }
+    }
+    bodyHit.set(a.id, hits);
+    res.set(a.id, { lim, by });
+  }
+  // pass 2: crossing / merging paths – the later arrival gives way
+  for (const a of movers) {
+    const ta = typeOf(a.type);
+    const sa = samples.get(a.id)!;
+    let { lim, by } = res.get(a.id)!;
+    const va = Math.max(a.gs * KT, 3);
+    for (const b of movers) {
+      if (b.id === a.id) continue;
+      if (bodyHit.get(a.id)!.has(b.id)) continue;
+      // b is already stopping for me (I am ahead on its path): I have priority
+      if (bodyHit.get(b.id)?.has(a.id)) continue;
+      const tb = typeOf(b.type);
+      const gap = dist(a.x, a.y, b.x, b.y);
+      if (gap > sa.look + 160) continue;
       // 2. intended paths cross: the later arrival gives way (pilots see-and-avoid)
       const sb = samples.get(b.id);
       if (!sb || (!assist && s.weather.visSM < 0.5)) continue;
@@ -165,7 +182,8 @@ export function computeGroundLimits(w: World): Map<number, GroundLimit> {
           if (dist(sa.x[i], sa.y[i], sb.x[j], sb.y[j]) < need) {
             const tA = sa.d[i] / va, tB = sb.d[j] / vb;
             if (tA > tB + 0.01 || (Math.abs(tA - tB) <= 0.01 && a.id > b.id)) {
-              const l = a.routeS + sa.d[i - 1] - 5;
+              // stop with the nose clear of the other aircraft's path
+              const l = a.routeS + sa.d[i] - ta.length / 2 - 14;
               if (l < lim) { lim = l; by = b.id; }
             }
             found = true;
@@ -192,6 +210,26 @@ export function runwayHot(w: World, r: Runway, except?: Aircraft): Aircraft | un
       const d = dist(o.x, o.y, e.end.x, e.end.y);
       if (d < 2.2 * 1852 && o.alt < 1500) return o;
     }
+  }
+  return undefined;
+}
+
+/** an aircraft rolling on the runway that has not yet passed the point where `ac` would enter it */
+export function rollingToward(w: World, ac: Aircraft): Aircraft | undefined {
+  const { ap } = w;
+  const e = endRef(ap, ac.rwy);
+  if (!e) return undefined;
+  const last = ac.route.length ? ap.nodes[ac.route[ac.route.length - 1]] : undefined;
+  const hi = last && last.kind === 'hold' ? holdInfo(ap, last.id) : undefined;
+  const ref = hi ? ap.nodes[hi.entry] : ac;
+  const [myAl] = alongCross(ref.x, ref.y, e.end.x, e.end.y, e.end.hdg);
+  for (const o of w.s.aircraft) {
+    if (o === ac || endRef(ap, o.rwy)?.rwy.id !== e.rwy.id) continue;
+    const rolling = o.phase === 'takeoff_roll' || (o.phase === 'landing_roll' && o.route.length < 2 && o.gs > 20);
+    if (!rolling) continue;
+    const dir = o.rwy === ac.rwy ? 1 : -1;
+    const [al] = alongCross(o.x, o.y, e.end.x, e.end.y, e.end.hdg);
+    if (dir > 0 ? al < myAl + 120 : al > myAl - 120) return o;
   }
   return undefined;
 }
@@ -476,6 +514,13 @@ function updateParked(w: World, ac: Aircraft) {
         ac.actual = undefined;
         ac.delay = 0;
         ac.fuel = typeOf(ac.type).fuelBurnKgMin * randRange(s, 150, 320);
+        // fresh flight: drop every per-flight flag / guidance value from the inbound leg
+        const keep = { turnTotal: ac.flags.turnTotal, turnStart: ac.flags.turnStart, deiced: ac.flags.deiced ?? 0 };
+        ac.flags = keep;
+        ac.tgtSpd = 0; ac.latMode = 'hdg'; ac.fix = undefined; ac.exitPref = undefined; ac.goArounds = 0;
+        ac.lastRwy = undefined; ac.checkedIn = false; ac.handedOff = false; ac.crossCleared = []; ac.taxiIdeal = undefined;
+        ac.taxiStart = undefined; ac.landedAt = undefined; ac.airborneAt = undefined; ac.trail = []; ac.depFix = undefined;
+        if (ac.emergency?.resolved) ac.emergency = undefined;
         s.stats.demand++;
       }
       return;
@@ -677,7 +722,7 @@ function updateTakeoffRoll(w: World, ac: Aircraft, dt: number) {
     for (const o of s.aircraft) {
       if (o === ac || isAirborne(o) || o.phase === 'gone' || o.phase === 'parked') continue;
       const [al, cr] = alongCross(o.x, o.y, ac.x, ac.y, e.end.hdg);
-      if (al > 30 && al < Math.min(2600, visRange) && Math.abs(cr) < 42) {
+      if (al > 30 && al < Math.min(2600, visRange) && Math.abs(cr) < (o.gs > 2 ? 80 : 42)) {
         rejectTakeoff(w, ac, `traffic on the runway`);
         s.stats.pilotGoArounds += 0;
         return;
@@ -775,7 +820,7 @@ export function updateGround(w: World, ac: Aircraft, dt: number, limits: Map<num
       if (ac.phase === 'vacated' && ac.kind === 'arrival') ac.delay = Math.max(0, s.t - ac.sched);
       break;
     case 'taxi_out': {
-      if (ac.reverse) { if (followRoute(w, ac, dt, limits) === 'limit') { finishReverse(ap, ac); ac.holdPos = true; } break; }
+      if (ac.reverse) { const r = followRoute(w, ac, dt, limits); if (r === 'limit' || (r === 'traffic' && s.t - (ac.blockedSince ?? s.t) > 8)) { finishReverse(ap, ac); ac.holdPos = true; } break; }
       const st = followRoute(w, ac, dt, limits);
       ac.delay = Math.max(0, s.t - ac.sched);
       if (st === 'limit') {
@@ -805,7 +850,7 @@ export function updateGround(w: World, ac: Aircraft, dt: number, limits: Map<num
       break;
     }
     case 'taxi_in': {
-      if (ac.reverse) { if (followRoute(w, ac, dt, limits) === 'limit') { finishReverse(ap, ac); ac.holdPos = true; } break; }
+      if (ac.reverse) { const r = followRoute(w, ac, dt, limits); if (r === 'limit' || (r === 'traffic' && s.t - (ac.blockedSince ?? s.t) > 8)) { finishReverse(ap, ac); ac.holdPos = true; } break; }
       const st = followRoute(w, ac, dt, limits);
       ac.delay = Math.max(0, s.t - ac.sched);
       if (st === 'limit') {

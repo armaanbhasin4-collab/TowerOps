@@ -12,9 +12,9 @@ import { typeOf } from './data/aircraft';
 import { EndRef, allEnds, endRef, holdsOf, runwayById, toraFrom } from './airport/query';
 import { World, isAirborne } from './world';
 import { issue, planTaxi } from './commands';
-import { cumOf, nextHoldAhead, runwayHot, runwayOccupants } from './ground';
+import { cumOf, nextHoldAhead, rollingToward, runwayHot, runwayOccupants } from './ground';
 import { gateOptions, gateUser } from './traffic';
-import { fixByName } from './air';
+import { fixByName, minSpeed } from './air';
 import { runwayWeatherIssue } from './weather';
 import { wakeDepartureInterval } from './separation';
 
@@ -61,7 +61,16 @@ export function pickDepartureRunway(w: World, ac: Aircraft): string | undefined 
     const plan = planTaxi(w, ac, { t: 'TAXI', rwy: e.end.name });
     if (typeof plan === 'string') continue;
     const queue = s.aircraft.filter((a) => a.rwy === e.end.name && ['taxi_out', 'holding_short', 'lining_up', 'lined_up'].includes(a.phase)).length;
-    const cost = plan.route.len + queue * 450;
+    let cost = plan.route.len + queue * 450;
+    const f = fixByName(w, ac.depFix);
+    if (f) {
+      // avoid crossing the departure path of a parallel departure runway on the way to the exit fix
+      const mySide = Math.sign(alongCross(f.x, f.y, e.end.x, e.end.y, e.end.hdg)[1]);
+      for (const o of cands) {
+        if (o.rwy.id === e.rwy.id || Math.abs(angDiff(o.end.hdg, e.end.hdg)) > 20) continue;
+        if (Math.sign(alongCross(o.end.x, o.end.y, e.end.x, e.end.y, e.end.hdg)[1]) === mySide) cost += 2600;
+      }
+    }
     if (cost < bestCost) { bestCost = cost; best = e.end.name; }
   }
   return best;
@@ -76,7 +85,9 @@ export function pickArrivalRunway(w: World, ac: Aircraft): string | undefined {
   for (const e of cands) {
     const f = fixByName(w, `F${e.end.name}`)!;
     const load = s.aircraft.filter((a) => a !== ac && a.rwy === e.end.name && isAirborne(a) && a.kind === 'arrival').length;
-    const cost = dist(ac.x, ac.y, f.x, f.y) / NM + load * 5 - (em ? e.rwy.length / 400 : 0);
+    const out = outerSide(w, e.end.name);
+    const mySide = Math.sign(alongCross(ac.x, ac.y, e.end.x, e.end.y, e.end.hdg)[1]);
+    const cost = dist(ac.x, ac.y, f.x, f.y) / NM + load * 4 + (out !== 0 && mySide !== out ? 14 : 0) - (em ? e.rwy.length / 400 : 0);
     if (cost < bestCost) { bestCost = cost; best = e.end.name; }
   }
   return best;
@@ -87,6 +98,22 @@ function runwayClearFor(w: World, ac: Aircraft, rid: string, kind: 'cross' | 'li
   const { ap, s } = w;
   const r = runwayById(ap, rid)!;
   if (kind !== 'cross' && s.rwy[rid].closed) return 'runway closed';
+  // clearances already transmitted but not yet read back / executed
+  for (const p of s.pending) {
+    const o = s.aircraft.find((x) => x.id === p.ac);
+    if (!o || o === ac) continue;
+    for (const c of p.cmds) {
+      if (c.t === 'CROSS' && endRef(ap, c.rwy)?.rwy.id === rid) return `${o.callsign} cleared to cross`;
+      if ((c.t === 'TAKEOFF' || c.t === 'LINE_UP') && endRef(ap, o.rwy)?.rwy.id === rid && kind !== 'cross') return `${o.callsign} cleared onto the runway`;
+      if (c.t === 'TAKEOFF' && endRef(ap, o.rwy)?.rwy.id === rid) return `${o.callsign} cleared for takeoff`;
+    }
+  }
+  for (const o of s.aircraft) {
+    if (o === ac || isAirborne(o)) continue;
+    if (kind !== 'cross' && o.crossCleared.includes(rid)) return `${o.callsign} crossing`;
+    if (kind === 'cross' && o.takeoffCleared && endRef(ap, o.rwy)?.rwy.id === rid && o.phase !== 'departure') return `${o.callsign} cleared for takeoff`;
+    if (kind !== 'cross' && (o.lineUpCleared || o.takeoffCleared) && o.phase === 'holding_short' && endRef(ap, o.rwy)?.rwy.id === rid) return `${o.callsign} entering the runway`;
+  }
   const lowVis = s.weather.visSM < 1;
   const finalGate = (kind === 'cross' ? 2.6 : kind === 'lineup' ? 2.8 : ac.phase === 'lined_up' ? 2.2 : 3.4) * (lowVis ? 1.6 : 1);
   for (const o of s.aircraft) {
@@ -98,6 +125,10 @@ function runwayClearFor(w: World, ac: Aircraft, rid: string, kind: 'cross' | 'li
     if (o.phase === 'landing_roll' && o.route.length < 2) return `${o.callsign} landing`;
     if (o.phase === 'lined_up' && (o.takeoffCleared || kind === 'takeoff')) return `${o.callsign} lined up`;
     if (o.phase === 'lining_up' && kind === 'takeoff') return `${o.callsign} lining up`;
+  }
+  if (kind !== 'cross' && ac.phase !== 'lined_up') {
+    const roller = rollingToward(w, ac);
+    if (roller) return `${roller.callsign} rolling`;
   }
   if (kind === 'takeoff') {
     const e = endRef(ap, ac.rwy)!;
@@ -138,10 +169,45 @@ function pathToGo(w: World, ac: Aircraft, endName: string): number {
   if (ac.flags.aiStage >= 3 || !base) return dist(ac.x, ac.y, e.end.x, e.end.y) / NM + 1.5;
   return dist(ac.x, ac.y, base.x, base.y) / NM + 8.5 + 9.5;
 }
+/** which side (+1 right / -1 left of the landing direction) is clear of the other active arrival runways; 0 = either */
+function outerSide(w: World, endName: string): number {
+  const e = endRef(w.ap, endName)!;
+  let sum = 0, n = 0;
+  for (const o of w.s.activeConfig.arr) {
+    const oe = endRef(w.ap, o);
+    if (!oe || oe.rwy.id === e.rwy.id || Math.abs(angDiff(oe.end.hdg, e.end.hdg)) > 20) continue;
+    sum += Math.sign(alongCross(oe.end.x, oe.end.y, e.end.x, e.end.y, e.end.hdg)[1]);
+    n++;
+  }
+  if (!n || Math.abs(sum) < n) return 0; // no parallels, or runways on both sides
+  return -Math.sign(sum);
+}
+function depOuterSide(w: World, e: EndRef): number {
+  let sum = 0, n = 0;
+  for (const r of w.ap.runways) {
+    if (r.id === e.rwy.id || Math.abs(angDiff(r.ends[0].hdg, e.end.hdg) % 180) > 20 && Math.abs(Math.abs(angDiff(r.ends[0].hdg, e.end.hdg)) - 180) > 20) continue;
+    sum += Math.sign(alongCross((r.ends[0].x + r.ends[1].x) / 2, (r.ends[0].y + r.ends[1].y) / 2, e.end.x, e.end.y, e.end.hdg)[1]);
+    n++;
+  }
+  if (!n || Math.abs(sum) < n) return 0;
+  return -Math.sign(sum);
+}
+/** platform altitude: runways sandwiched between other arrival runways intercept 1000 ft higher */
+function platformAlt(w: World, endName: string): number {
+  const e = endRef(w.ap, endName)!;
+  const group = w.s.activeConfig.arr.filter((o) => { const oe = endRef(w.ap, o); return oe && Math.abs(angDiff(oe.end.hdg, e.end.hdg)) < 20; });
+  // each parallel stream gets its own level so traffic is 1000 ft apart until established
+  return 3000 + Math.max(0, Math.min(2, group.indexOf(endName))) * 1000;
+}
 function bestBase(w: World, ac: Aircraft, endName: string) {
   const bases = w.ap.fixes.filter((f) => f.kind === 'nav' && f.rwy === endName);
   if (ac.flags.aiBase) return bases.find((b) => b.name.charCodeAt(b.name.length - 1) === ac.flags.aiBase) ?? bases[0];
-  return bases.sort((a, b) => dist(ac.x, ac.y, a.x, a.y) - dist(ac.x, ac.y, b.x, b.y))[0];
+  const out = outerSide(w, endName);
+  const e = endRef(w.ap, endName)!;
+  return bases.sort((a, b) => {
+    const pen = (f: typeof a) => (out !== 0 && Math.sign(alongCross(f.x, f.y, e.end.x, e.end.y, e.end.hdg)[1]) !== out ? 40 * NM : 0);
+    return dist(ac.x, ac.y, a.x, a.y) + pen(a) - dist(ac.x, ac.y, b.x, b.y) - pen(b);
+  })[0];
 }
 
 function suggestArrival(w: World, ac: Aircraft): Suggestion | undefined {
@@ -192,8 +258,8 @@ function suggestArrival(w: World, ac: Aircraft): Suggestion | undefined {
       const nearField = dist(ac.x, ac.y, 0, 0) < 9 * NM;
       if (base && !nearField) cmds.push({ t: 'DIRECT', fix: base.name });
       else cmds.push({ t: 'DIRECT', fix: `F${rwy}` });
-      cmds.push({ t: 'ALTITUDE', alt: Math.min(5000, Math.max(3000, Math.floor(ac.alt / 1000) * 1000)) }, { t: 'SPEED', spd: Math.max(210, 0) }, { t: 'ASSIGN_RUNWAY', rwy });
-      if (ac.ias < 205 || typeOf(ac.type).cruiseKt < 215) cmds.splice(2, 1);
+      cmds.push({ t: 'ALTITUDE', alt: platformAlt(w, rwy) + 2000 }, { t: 'SPEED', spd: 210 }, { t: 'ASSIGN_RUNWAY', rwy });
+      if (ac.ias < 205 || typeOf(ac.type).cruiseKt < 215 || minSpeed(w, ac) > 210) cmds.splice(2, 1);
       return { cmds, label: `Vector for ILS ${rwy} via ${base?.name ?? 'final'}`, pos, wait: undefined };
     }
     // stack management at the holding fix
@@ -214,13 +280,15 @@ function suggestArrival(w: World, ac: Aircraft): Suggestion | undefined {
     if (!base || d < 1.6 || ac.latMode === 'hold') {
       const side = base ? alongCross(base.x, base.y, e.end.x, e.end.y, e.end.hdg)[1] : 0;
       const hdg = norm360(Math.round((e.end.hdg + (side > 0 ? -40 : 40)) / 5) * 5) || 360;
-      return { cmds: [{ t: 'HEADING', hdg }, { t: 'ALTITUDE', alt: 3000 }, { t: 'SPEED', spd: Math.max(180, typeOf(ac.type).vref + 20) }, { t: 'APPROACH', rwy }], label: `Turn base, cleared ILS ${rwy}`, pos };
+      const cmds: Command[] = [{ t: 'HEADING', hdg }, { t: 'ALTITUDE', alt: platformAlt(w, rwy) }, { t: 'SPEED', spd: 180 }, { t: 'APPROACH', rwy }];
+      if (minSpeed(w, ac) > 180 || typeOf(ac.type).cruiseKt < 190) cmds.splice(2, 1);
+      return { cmds, label: `Turn base, cleared ILS ${rwy}`, pos };
     }
     return undefined;
   }
   if (stage === 2 && ac.latMode === 'fix' && ac.fix === `F${rwy}`) {
     const f = fixByName(w, `F${rwy}`)!;
-    if (dist(ac.x, ac.y, f.x, f.y) < 6 * NM || dist(ac.x, ac.y, e.end.x, e.end.y) < 12 * NM) return { cmds: [{ t: 'ALTITUDE', alt: 3000 }, { t: 'APPROACH', rwy }], label: `Cleared ILS ${rwy}`, pos };
+    if (dist(ac.x, ac.y, f.x, f.y) < 6 * NM || dist(ac.x, ac.y, e.end.x, e.end.y) < 12 * NM) return { cmds: [{ t: 'ALTITUDE', alt: platformAlt(w, rwy) }, { t: 'APPROACH', rwy }], label: `Cleared ILS ${rwy}`, pos };
   }
   return undefined;
 }
@@ -238,6 +306,7 @@ function noteArrival(w: World, ac: Aircraft, sg: Suggestion) {
     if (direct.fix.startsWith('B')) { ac.flags.aiStage = 1; ac.flags.aiBase = direct.fix.charCodeAt(direct.fix.length - 1); }
     else ac.flags.aiStage = 2;
   } else if (sg.cmds.some((c) => c.t === 'APPROACH')) ac.flags.aiStage = 3;
+  if (ac.phase === 'departure' && sg.cmds.some((c) => c.t === 'HEADING')) ac.flags.aiDep = 1;
 }
 
 export function suggest(w: World, ac: Aircraft): Suggestion | undefined {
@@ -251,6 +320,9 @@ export function suggest(w: World, ac: Aircraft): Suggestion | undefined {
       if (!ac.pushApproved && ac.request?.type === 'pushback') {
         const near = s.aircraft.find((o) => o !== ac && !isAirborne(o) && o.phase !== 'parked' && o.phase !== 'gone' && dist(o.x, o.y, ac.x, ac.y) < 170 && (o.gs > 0.5 || o.phase === 'pushback' || o.phase === 'push_done'));
         if (near) return { cmds: [], label: '', pos: 'ground', wait: `${near.callsign} moving behind the stand` };
+        const g = ap.gates.find((x) => x.name === ac.gate);
+        const thru = g && s.aircraft.find((o) => o !== ac && (o.phase === 'taxi_in' || o.phase === 'taxi_out') && dist(o.x, o.y, ac.x, ac.y) < 450 && o.route.includes(g.lane) && cumOf(ap, o.route)[o.route.indexOf(g.lane)] > o.routeS);
+        if (thru) return { cmds: [], label: '', pos: 'ground', wait: `${thru.callsign} taxiing past the stand` };
         return { cmds: [{ t: 'PUSHBACK' }], label: 'Approve pushback', pos: 'ground' };
       }
       return undefined;
@@ -269,10 +341,17 @@ export function suggest(w: World, ac: Aircraft): Suggestion | undefined {
     case 'taxi_out':
     case 'taxi_in': {
       if (ac.reverse) return undefined;
+      if (ac.request?.type === 'tow' && ac.gs < 0.5 && s.t - ac.request.since > 600) ac.request = undefined;
+      if (ac.request?.type === 'tow' && ac.gs < 0.5 && ac.blockedBy === undefined) {
+        // conflict has cleared on its own
+        ac.request = undefined;
+        return ac.holdPos ? { cmds: [{ t: 'CONTINUE_TAXI' }], label: 'Continue taxi', pos: 'ground' } : undefined;
+      }
       if (ac.request?.type === 'tow' && ac.gs < 0.5) {
         // head-on: tow the lower-priority aircraft
         const other = s.aircraft.find((o) => o.id === ac.blockedBy);
-        if (!other || ac.id > other.id || other.reverse) return other?.reverse ? undefined : { cmds: [{ t: 'TOW' }], label: 'Tow back to clear the conflict', pos: 'ground' };
+        if (other?.reverse && other.flags.tow) return undefined;
+        if (!other || ac.id > other.id || other.phase === 'pushback' || other.phase === 'disabled') return { cmds: [{ t: 'TOW' }], label: 'Tow back to clear the conflict', pos: 'ground' };
         return undefined;
       }
       if (ac.holdPos && !(ac.emergency && !ac.emergency.resolved)) return { cmds: [{ t: 'CONTINUE_TAXI' }], label: 'Continue taxi', pos: 'ground' };
@@ -309,9 +388,19 @@ export function suggest(w: World, ac: Aircraft): Suggestion | undefined {
       const cmds: Command[] = [];
       if (ac.emergency && !ac.emergency.resolved) return undefined;
       if (ac.alt < 600) return undefined;
-      if (ac.latMode !== 'fix' && ac.depFix && !ac.flags.vectored) cmds.push({ t: 'DIRECT', fix: ac.depFix });
+      const f = fixByName(w, ac.depFix);
+      if (f && ac.latMode !== 'fix') {
+        const brg = hdgOf(f.x - ac.x, f.y - ac.y);
+        const turn = angDiff(ac.hdg, brg);
+        const e = endRef(ap, ac.rwy);
+        // large turns are made away from the parallel runways, then direct once pointing at the fix
+        const out = e ? depOuterSide(w, e) : 0;
+        if (Math.abs(turn) > 100 && out !== 0 && !ac.flags.aiDep) {
+          cmds.push({ t: 'HEADING', hdg: Math.round(brg / 10) * 10 || 360, dir: out > 0 ? 'R' : 'L' });
+        } else if (!ac.flags.aiDep || Math.abs(turn) < 30) cmds.push({ t: 'DIRECT', fix: f.name });
+      }
       if (ac.tgtAlt < ap.ceiling) cmds.push({ t: 'ALTITUDE', alt: ap.ceiling });
-      if (cmds.length) return { cmds, label: `Climb ${ap.ceiling}, direct ${ac.depFix}`, pos: 'departure' };
+      if (cmds.length) return { cmds, label: cmds.map((c) => (c.t === 'DIRECT' ? `direct ${c.fix}` : c.t === 'HEADING' ? `turn ${c.dir === 'R' ? 'right' : 'left'} heading ${c.hdg}` : c.t === 'ALTITUDE' ? `climb ${c.alt}` : '')).join(', '), pos: 'departure' };
       return undefined;
     }
     case 'inbound':
