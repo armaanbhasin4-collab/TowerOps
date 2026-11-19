@@ -149,6 +149,7 @@ function after(r: CommandResult) {
   const st = useUI.getState();
   if (!r.ok && r.message) { st.notify(r.message, 'error'); if (st.settings.sound) tone('error'); }
   else if (r.ok && st.settings.sound) tone('ok');
+  if (r.ok && st.preview) useUI.setState({ preview: null });
   useUI.setState({ tick: st.tick + 1 });
 }
 
