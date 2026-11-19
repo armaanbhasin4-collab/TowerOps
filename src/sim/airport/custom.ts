@@ -61,6 +61,7 @@ const rwyNum = (h: number) => { const n = Math.round(norm360(h) / 10) % 36; retu
 const pad = (n: number) => String(n).padStart(2, '0');
 
 export function customAirportDef(p: CustomAirportParams, over: Partial<AirportDef> = {}): AirportDef {
+  p = { ...p, taxiComplexity: Math.min(1, Math.max(0, p.taxiComplexity || 0)) };
   const sc = Math.min(1.6, Math.max(0.6, p.size));
   const primaryHdg = p.runways[0]?.hdg ?? 90;
   const T: TaxiwayDef[] = [];
@@ -179,9 +180,13 @@ export function customAirportDef(p: CustomAirportParams, over: Partial<AirportDe
   cross.forEach((r, i) => {
     const side = i % 2 === 0 ? 1 : -1;
     const k = Math.floor(i / 2);
-    const cx = side * (Math.max(Math.abs(coreL), Math.abs(coreR)) + 330 + k * 430);
     const rel = (angDiff(primaryHdg, r.hdg) * Math.PI) / 180; // angle from local east, clockwise
     const ux = Math.cos(rel), uy = -Math.sin(rel);
+    // far enough out that the runway strip clears every corner of the terminal core
+    let off = 0;
+    for (const qx of [coreL - 40, coreR + 40]) for (const qy of [yB - 20, yA + 20])
+      off = Math.max(off, side * qx + (330 + Math.abs(qy * ux)) / Math.max(0.35, Math.abs(uy)));
+    const cx = side * (off + (k * 430) / Math.max(0.35, Math.abs(uy)));
     const cy = r.along * 0.5;
     const ax = cx - (ux * r.length) / 2, ay = cy - (uy * r.length) / 2;
     const bx = cx + (ux * r.length) / 2, by = cy + (uy * r.length) / 2;

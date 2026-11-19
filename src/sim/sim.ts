@@ -18,7 +18,7 @@ import { runDelegation } from './delegation';
 import { setupChallenge } from './scenarios';
 
 export const DT = 0.1; // fixed simulation step (s)
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
 
 export const DIFFICULTY_PRESETS: Record<Exclude<Difficulty['preset'], 'custom'>, Difficulty> = {
   beginner: { preset: 'beginner', maxAircraft: 6, arrivalRate: 9, departureRate: 8, emergencyFreq: 0.15, weatherSeverity: 0.1, pilotAssist: true, atcGuidance: true, safetyIntervention: true, strictSeparation: false, wakeSeparation: false, radioComplexity: 0, fuelRealism: false, perfRealism: false, collisionEnds: false, groundComplexity: 0.2, runwayCapacity: 1 },
@@ -51,6 +51,7 @@ export class Sim implements World {
     this.ap = getAirport(cfg);
     if (saved) {
       this.s = saved;
+      this.limits = computeGroundLimits(this);
       return;
     }
     // scale traffic to what the airport can plausibly handle
@@ -64,6 +65,7 @@ export class Sim implements World {
       activeConfig: this.ap.configs.find((c) => c.name === cfg.configName) ?? this.ap.configs[0],
       events: [], radio: [], alerts: [], stats: emptyStats(), pending: [],
       nextArrival: 30, nextOrigin: 300, nextEmergency: Infinity, usedCallsigns: [], over: false, track: [], atis: 'A', spawnQueue: 0,
+      aux: { seen: {}, wx: {}, meter: { lastEta: {}, lastWake: {}, lastTx: {} } },
     };
     for (const r of this.ap.runways) this.s.rwy[r.id] = { closed: false, lastDep: {}, lastArr: {}, movements: 0, busySeconds: 0 };
     this.s.weather = makeWeather(this, cfg.weatherPreset);

@@ -138,9 +138,8 @@ export function updateWeather(w: World) {
   }
 }
 
-const flags = new WeakMap<object, Record<string, number>>();
-const wxFlag = (w: World, k: string) => flags.get(w.s)?.[k] ?? 0;
-const setWxFlag = (w: World, k: string, v: number) => { if (!flags.has(w.s)) flags.set(w.s, {}); flags.get(w.s)![k] = v; };
+const wxFlag = (w: World, k: string) => w.s.aux.wx[k] ?? 0;
+const setWxFlag = (w: World, k: string, v: number) => { w.s.aux.wx[k] = v; };
 
 export function bumpAtis(w: World) {
   const c = w.s.atis.charCodeAt(0);

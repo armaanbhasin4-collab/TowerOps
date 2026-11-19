@@ -4,6 +4,7 @@ import type { CustomAirportParams, Difficulty, GameMode, ScenarioConfig, SizeCla
 import { DIFFICULTY_PRESETS, Sim, defaultConfig } from '../sim/sim';
 import { AIRPORT_DEFS, getAirport } from '../sim/airport';
 import { validateAirport } from '../sim/airport/build';
+import { layoutWarnings } from '../sim/airport/query';
 import { CUSTOM_AIRLINES, defaultCustomParams, runwaySpecs } from '../sim/airport/custom';
 import { CAREER, CHALLENGES, careerConfig, challengeConfig } from '../sim/scenarios';
 import { airlineOf } from '../sim/data/airlines';
@@ -48,7 +49,7 @@ function Preview({ cfg }: { cfg: Pick<ScenarioConfig, 'airportId' | 'custom'> })
       const c = defaultConfig(cfg.airportId, 'beginner');
       const sim = new Sim({ ...c, custom: cfg.custom, emptyStart: true });
       const problems = validateAirport(sim.ap);
-      setErr(problems.join('; '));
+      setErr([...problems, ...(sim.ap.fictional ? layoutWarnings(sim.ap) : [])].slice(0, 4).join('; '));
       draw(cv.getContext('2d')!, W, H, sim, fitAirport(sim.ap, W, H), { mode: 'ground', selectedId: null, tagLevel: 0, showFixes: false, showRings: false, showTrails: false, showWeather: false, showLabels: true, showVectors: false, filter: 'all', guidance: false, time: 0 });
     } catch (e) { setErr((e as Error).message); }
     // eslint-disable-next-line react-hooks/exhaustive-deps

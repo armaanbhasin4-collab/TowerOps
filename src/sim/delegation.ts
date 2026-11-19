@@ -26,13 +26,7 @@ export interface Suggestion {
   wait?: string;
 }
 
-interface Meter { lastEta: Record<string, number>; lastWake: Record<string, string>; lastTx: Record<number, number> }
-const meters = new WeakMap<object, Meter>();
-function meter(w: World): Meter {
-  let m = meters.get(w.s);
-  if (!m) { m = { lastEta: {}, lastWake: {}, lastTx: {} }; meters.set(w.s, m); }
-  return m;
-}
+const meter = (w: World) => w.s.aux.meter;
 
 function intersecting(w: World, rid: string): string[] {
   const r = runwayById(w.ap, rid)!;

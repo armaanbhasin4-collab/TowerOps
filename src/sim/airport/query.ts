@@ -63,8 +63,8 @@ export function rwyLateral(r: Runway, x: number, y: number): number {
 /** id of the runway whose protected area contains the point, if any */
 export function runwayZoneAt(ap: Airport, x: number, y: number): Runway | undefined {
   for (const r of ap.runways) {
-    const [al, cr] = alongCross(x, y, r.ends[0].x, r.ends[0].y, r.ends[0].hdg);
-    if (Math.abs(cr) < ap.holdDist - 12 && al > -60 && al < r.length + 60) return r;
+    // same capsule shape the holding positions are placed on, so a hold line is never inside the zone
+    if (rwyLateral(r, x, y) < ap.holdDist - 12) return r;
   }
   return undefined;
 }
@@ -142,3 +142,18 @@ export function windComponents(endHdg: number, windDir: number, windKt: number):
 }
 
 export const segHdg = (ap: Airport, a: number, b: number) => hdgOf(ap.nodes[b].x - ap.nodes[a].x, ap.nodes[b].y - ap.nodes[a].y);
+
+/** Operational shortcomings of a layout that do not break routing (shown by the custom airport builder). */
+export function layoutWarnings(ap: Airport): string[] {
+  const out: string[] = [];
+  for (const r of ap.runways) {
+    const hs = holdsOf(ap, r.id);
+    for (const idx of [0, 1] as const) {
+      const best = Math.max(0, ...hs.map((h) => toraFrom(h, idx)));
+      if (best < r.length - 150) out.push(`runway ${r.ends[idx].name}: longest takeoff run from a holding point is ${Math.round(best)} of ${Math.round(r.length)} m`);
+    }
+  }
+  const bad = ap.gates.filter((g) => runwayZoneAt(ap, ap.nodes[g.node].x, ap.nodes[g.node].y));
+  if (bad.length) out.push(`${bad.length} stand(s) lie inside a runway strip (${bad.slice(0, 4).map((g) => g.name).join(', ')}…) – reduce terminals/gates or runway count`);
+  return out;
+}

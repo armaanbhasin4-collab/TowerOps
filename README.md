@@ -107,6 +107,10 @@ it about 40° toward the final, descend to 3,000 ft and clear the ILS; then give
 - The 3D tower view is a visualisation of the same state; it is simpler than the 2D views (no storm
   cells or closed-runway markings) and has not been performance-profiled on real GPUs.
 - Departures cannot return to a gate once pushed back (except emergency aircraft that land again).
+- The custom airport generator is solid for parallel layouts (1–8 runways). Dense crossing layouts
+  (roughly 3+ intersecting runways or many large terminals) can produce runway ends without a
+  full-length holding point, or stands too close to a crossing runway; the builder preview lists
+  these warnings. Such airports still route and play, with intersection departures.
 - Replay covers recorded positions only (2-second samples, last 30 minutes), not full state rewind.
 
 ## Architecture

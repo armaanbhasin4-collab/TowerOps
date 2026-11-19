@@ -545,6 +545,8 @@ export interface SimState {
   track: TrackFrame[];
   atis: string; // information letter
   spawnQueue: number; // arrivals waiting outside the airspace due to caps
+  /** bookkeeping that must survive save/load: logged-conflict latches, weather advisories, AI metering */
+  aux: { seen: Record<string, number>; wx: Record<string, number>; meter: { lastEta: Record<string, number>; lastWake: Record<string, string>; lastTx: Record<number, number> } };
 }
 
 // ───────────────────────────── Commands ─────────────────────────────

@@ -27,18 +27,16 @@ export function wakeDepartureInterval(leader: WakeCat, follower: WakeCat): numbe
   return 50;
 }
 
-const seen = new WeakMap<object, Map<string, number>>();
 function once(w: World, key: string, active: boolean): boolean {
-  let m = seen.get(w.s);
-  if (!m) { m = new Map(); seen.set(w.s, m); }
+  const m = w.s.aux.seen;
   if (active) {
-    const first = !m.has(key);
-    m.set(key, w.s.t);
+    const first = !(key in m);
+    m[key] = w.s.t;
     return first;
   }
   // forget after it has been inactive for 20 s (hysteresis)
-  const last = m.get(key);
-  if (last !== undefined && w.s.t - last > 20) m.delete(key);
+  const last = m[key];
+  if (last !== undefined && w.s.t - last > 20) delete m[key];
   return false;
 }
 
