@@ -138,6 +138,11 @@ export default function StartScreen() {
           <div className="text-right text-[11px] text-slate-500 max-w-[330px]">A game simulation – not certified for, and not connected to, real-world air traffic control. Airlines and aircraft types are real; flights are simulated.</div>
         </div>
 
+        <button className="mt-4 w-full text-left rounded border border-emerald-700 bg-emerald-950/40 hover:bg-emerald-900/40 px-4 py-3 flex items-center justify-between" onClick={() => useUI.getState().openPilot()} data-testid="open-pilot">
+          <span><span className="text-emerald-200 text-[15px] font-semibold">Fly it yourself — the pilot's seat</span><br /><span className="text-slate-400 text-[12.5px]">Full cockpit, checklists, engine start, pushback, taxi, takeoff, autopilot, ILS and landing between these airports. Choose anything from every-switch procedures to easy flying.</span></span>
+          <span className="text-emerald-300 text-xl">→</span>
+        </button>
+
         <div className="flex gap-1 mt-4">
           {([['sandbox', 'Sandbox'], ['career', 'Career'], ['challenge', 'Challenges'], ['realism', 'Realism']] as [GameMode, string][]).map(([m, l]) => (
             <button key={m} onClick={() => setMode(m)} className={`px-4 py-2 rounded-t border border-b-0 text-[13px] uppercase tracking-wider ${mode === m ? 'bg-navy-800 border-navy-600 text-cyan-a' : 'border-transparent text-slate-400 hover:text-slate-200'}`}>{l}</button>

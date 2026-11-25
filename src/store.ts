@@ -1,3 +1,4 @@
+import type { PilotConfig } from './pilot/types';
 /** UI store + real-time game loop. The Sim instance is the single source of truth; React re-renders on `tick`. */
 import { create } from 'zustand';
 import { Sim, DT } from './sim/sim';
@@ -23,7 +24,11 @@ export interface Toast { text: string; kind: 'ok' | 'error' | 'info'; at: number
 export interface Preview { nodes: number[]; ac: number }
 
 interface UI {
-  screen: 'start' | 'game';
+  screen: 'start' | 'game' | 'pilotSetup' | 'pilot';
+  pilotCfg: PilotConfig | null;
+  pilotKey: number;
+  openPilot(): void;
+  startPilot(cfg: PilotConfig): void;
   sim: Sim | null;
   tick: number;
   speed: number;
@@ -62,7 +67,10 @@ interface UI {
 let lastRadio = 0, lastEvent = 0, lastReqCount = 0;
 
 export const useUI = create<UI>((set, get) => ({
-  screen: 'start', sim: null, tick: 0, speed: 1, paused: false, selectedId: null, view: 'ground', follow: false, focus: null,
+  screen: 'start', pilotCfg: null, pilotKey: 0,
+  openPilot() { set({ screen: 'pilotSetup' }); },
+  startPilot(cfg) { set({ screen: 'pilot', pilotCfg: cfg, pilotKey: get().pilotKey + 1 }); },
+  sim: null, tick: 0, speed: 1, paused: false, selectedId: null, view: 'ground', follow: false, focus: null,
   settings: { ...defaultSettings, ...getPrefs<Partial<Settings>>({}) }, toast: null, preview: null, modal: null, replayAt: null, careerLevel: null,
 
   start(cfg, careerLevel) {

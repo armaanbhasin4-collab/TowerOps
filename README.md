@@ -41,6 +41,26 @@ aircraft to follow it.
 (`B26RN`/`B26RS`, 16 NM out, 5.5 NM abeam). Send an arrival direct to a base fix at 4–5,000 ft, turn
 it about 40° toward the final, descend to 3,000 ft and clear the ILS; then give the landing clearance.
 
+## The pilot's seat (flight deck mode)
+
+From the start screen choose **Fly it yourself**. You fly one aircraft from a cockpit: outside 3D view, primary flight display, navigation display / moving map, engine display, autopilot panel, overhead and pedestal switches, checklists and ATC.
+
+- **Aircraft:** a single-engine piston trainer (Cessna 172S class) and a twin-jet airliner (Boeing 737-800 class).
+- **Flights:** airport to airport, traffic-pattern circuits with touch-and-goes, or approach-and-landing practice. Short hops: LGA ↔ JFK (9 NM) and ATL ↔ Cedar Valley (about 85 NM).
+- **Four realism levels**, and every assist can also be toggled individually in flight:
+  - *Full procedures* – cold and dark; every switch, checklist, radio call and frequency is yours.
+  - *Line pilot* – powered up at the stand; the first officer runs the switch flows, you start engines, talk, taxi and fly.
+  - *Fly the aeroplane* – lined up on the runway; radio, gear, flaps and rudder handled, stall protection on.
+  - *Easy* – plus auto-trim, bank control and an autopilot that can land.
+- **Procedures that are checked against the real state:** battery/ground power/APU, IRS alignment, bleed air, hydraulics, fuel pumps, engine start (N2, fuel lever, EGT, hot starts), pushback, generators, packs, lights, transponder, altimeter setting, flaps/trim/speedbrake, autobrake; for the trainer: priming, magnetos, run-up magneto check, mixture leaning, fuel pump.
+- **ATC from the cockpit:** IFR clearance, pushback, taxi route, line-up/takeoff, departure, centre, approach, landing clearance, taxi to the gate; pilot deviations (altitude busts, 250 kt below 10,000 ft, runway incursion, no clearance) are recorded.
+- **Instructor:** hints for the current phase, "show me" for each checklist item, and *Instructor: fly it for me* (key `I`) which flies and works the cockpit until you take over.
+- **Debrief:** each landing is graded (sink rate, centreline, touchdown point, speed, crab) with procedure, ATC, flying and safety scores.
+
+Keys: arrows = yoke (↓ pulls), `A`/`D` rudder, `W`/`S` throttle, `Space` brakes, `P` parking brake, `F`/`Shift+F` flaps, `G` gear, `[` `]` trim, `/` speedbrake, `T` reverse, `Q` autopilot, `M` mouse yoke, `V` view, `,` `.` time acceleration, `Esc` pause.
+
+**What it is not.** A procedure and handling familiarisation tool, not a certified trainer. Both aircraft are generic models tuned from public, rounded figures, and the checklists are abbreviated generic procedures, not any manufacturer's or operator's. The world is flat with no terrain; headings are true (no magnetic variation); enroute waypoints and all radio/ILS frequencies are synthetic; system timings are shortened; there is no other traffic, no failures and no save/load for flights. Control feel was tuned and tested with scripted and instructor-flown flights plus brief keyboard checks in a headless browser; it has not been flown extensively by hand, and gamepad support is basic and untested on real hardware. Speech uses the browser's voice and was not verified in the test environment.
+
 ## What is simulated
 
 - **Lifecycle** — arrivals: airspace entry → vectors/holding → ILS → landing roll → runway exit →
@@ -114,6 +134,9 @@ it about 40° toward the final, descend to 3,000 ft and clear the ILS; then give
 - Replay covers recorded positions only (2-second samples, last 30 minutes), not full state rewind.
 
 ## Architecture
+
+The pilot side lives in `src/pilot/` (engine: `flight.ts` dynamics, `systems.ts`, `autopilot.ts`, `checklists.ts`, `atc.ts`, `copilot.ts` first officer/instructor, `world.ts`, `scoring.ts`, `sim.ts`) and `src/ui/pilot/` (cockpit UI, canvas instruments, three.js outside view). It reuses the airport layouts and taxi pathfinding of the tower side. Tests: `tests/pilot.test.ts`.
+
 
 ```
 src/sim/            simulation engine – no DOM, no rendering, fully deterministic for a given seed
